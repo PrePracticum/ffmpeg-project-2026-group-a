@@ -20,6 +20,10 @@ namespace FFmpeg.API.Endpoints
             app.MapPost("/api/video/watermark", AddWatermark)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
+
+            app.MapPost("/api/video/brightness-contrast", ChangeBrightnessContrast)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
         }
 
         private static async Task<IResult> AddWatermark(
@@ -94,6 +98,75 @@ namespace FFmpeg.API.Endpoints
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
 
+        }
+        private static async Task<IResult> ChangeBrightnessContrast(
+            HttpContext context,
+            [FromForm] BrightnessContrastDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                // 1. Validate request
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                // 2. Save uploaded file
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+
+                // 3. Generate output filename
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                // 4. Track files to clean up
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    // 5. Create and execute the command
+                    var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
+                    var builder = context.RequestServices.GetRequiredService<FFmpeg.Infrastructure.Commands.ICommandBuilder>();
+                    var command = new FFmpeg.Infrastructure.Commands.BrightnessContrastCommand(executor, builder);
+
+                    var result = await command.ExecuteAsync(new BrightnessContrastModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        Brightness = dto.Brightness,
+                        Contrast = dto.Contrast
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to change brightness and contrast: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    // 6. Read the output file
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+
+                    // 7. Clean up temporary files
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    // 8. Return the file to the user
+                    return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing brightness/contrast request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in ChangeBrightnessContrast endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
         }
     }
 }
