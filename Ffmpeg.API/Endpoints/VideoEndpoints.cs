@@ -108,25 +108,20 @@ namespace FFmpeg.API.Endpoints
 
             try
             {
-                // 1. Validate request
                 if (dto.VideoFile == null)
                 {
                     return Results.BadRequest("Video file is required");
                 }
 
-                // 2. Save uploaded file
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
 
-                // 3. Generate output filename
                 string extension = Path.GetExtension(dto.VideoFile.FileName);
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
 
-                // 4. Track files to clean up
                 List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
 
                 try
                 {
-                    // 5. Create and execute the command
                     var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
                     var builder = context.RequestServices.GetRequiredService<FFmpeg.Infrastructure.Commands.ICommandBuilder>();
                     var command = new FFmpeg.Infrastructure.Commands.BrightnessContrastCommand(executor, builder);
@@ -146,13 +141,10 @@ namespace FFmpeg.API.Endpoints
                         return Results.Problem("Failed to change brightness and contrast: " + result.ErrorMessage, statusCode: 500);
                     }
 
-                    // 6. Read the output file
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
 
-                    // 7. Clean up temporary files
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
-                    // 8. Return the file to the user
                     return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
                 }
                 catch (Exception ex)
