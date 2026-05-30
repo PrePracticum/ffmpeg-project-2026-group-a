@@ -42,6 +42,9 @@ builder.Services.AddScoped<IFFmpegServiceFactory>(provider =>
 // Add file service for handling temporary files
 builder.Services.AddScoped<IFileService, FileService>();
 
+// Register Video Rotation Service
+builder.Services.AddScoped<IRotationService, RotationService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
@@ -57,4 +60,3 @@ app.MapEndpoints();
 
 app.MapGet("/", () => { return "FFmpeg API is running"; });
 app.Run();
-

@@ -28,6 +28,11 @@ namespace FFmpeg.API.Endpoints
             app.MapPost("/api/video/extract-frame", ExtractFrame)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
+            // התוספת שלך: מיפוי נקודת הקצה לסיבוב וידאו
+            app.MapPost("/api/video/rotate", RotateVideo)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
         }
 
         private static async Task<IResult> AddWatermark(
@@ -54,7 +59,6 @@ namespace FFmpeg.API.Endpoints
                 string extension = Path.GetExtension(dto.VideoFile.FileName);
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
 
-                // Track files to clean up
                 List<string> filesToCleanup = new List<string> { videoFileName, watermarkFileName, outputFileName };
 
                 try
@@ -91,7 +95,6 @@ namespace FFmpeg.API.Endpoints
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Error processing watermark request");
-                    // Clean up on error
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
                     throw;
                 }
@@ -101,8 +104,8 @@ namespace FFmpeg.API.Endpoints
                 logger.LogError(ex, "Error in AddWatermark endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
-
         }
+
         private static async Task<IResult> ChangeBrightnessContrast(
             HttpContext context,
             [FromForm] BrightnessContrastDto dto)
@@ -232,6 +235,65 @@ namespace FFmpeg.API.Endpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in ExtractFrame endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
+        // התוספת שלך: פונקציית הקצה לסיבוב וידאו
+        private static async Task<IResult> RotateVideo(
+            HttpContext context,
+            [FromForm] IFormFile videoFile,
+            [FromForm] double angle)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var rotationService = context.RequestServices.GetRequiredService<IRotationService>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (videoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                // שמירת הקובץ הזמני שהמשתמש העלה לשרת
+                string videoFileName = await fileService.SaveUploadedFileAsync(videoFile);
+
+                // יצירת שם ייחודי זמני עבור קובץ הפלט
+                string extension = Path.GetExtension(videoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    // הפעלת מחלקת התשתית שכתבנו יחד כדי להריץ את ה-FFmpeg
+                    rotationService.RotateVideo(new RotationModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        Angle = angle
+                    });
+
+                    // קריאת המערך הבינארי של קובץ הפלט שנוצר מהסיבוב
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+
+                    // מחיקת הקבצים הזמניים מהספרייה המקומית לשמירה על השרת נקי
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    // החזרת קובץ הוידאו המסובב ישירות למשתמש להורדה
+                    return Results.File(fileBytes, "video/mp4", videoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing video rotation request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in RotateVideo endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
