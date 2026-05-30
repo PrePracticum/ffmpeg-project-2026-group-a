@@ -10,6 +10,7 @@ using FFmpeg.Core.Interfaces;
 using FFmpeg.Core.Models;
 using FFmpeg.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Builder;
 
 namespace FFmpeg.API.Endpoints
 {
@@ -24,6 +25,10 @@ namespace FFmpeg.API.Endpoints
             app.MapPost("/api/video/brightness-contrast", ChangeBrightnessContrast)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
+            // הניתוב החדש שלנו לשינוי מהירות
+            app.MapPost("/api/video/change-speed", ChangeSpeed)
+                .DisableAntiforgery();
         }
 
         private static async Task<IResult> AddWatermark(
@@ -32,30 +37,25 @@ namespace FFmpeg.API.Endpoints
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
             var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
-            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>(); // or a specific logger type
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
 
             try
             {
-                // Validate request
                 if (dto.VideoFile == null || dto.WatermarkFile == null)
                 {
                     return Results.BadRequest("Video file and watermark file are required");
                 }
 
-                // Save uploaded files
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
                 string watermarkFileName = await fileService.SaveUploadedFileAsync(dto.WatermarkFile);
 
-                // Generate output filename
                 string extension = Path.GetExtension(dto.VideoFile.FileName);
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
 
-                // Track files to clean up
                 List<string> filesToCleanup = new List<string> { videoFileName, watermarkFileName, outputFileName };
 
                 try
                 {
-                    // Create and execute the watermark command
                     var command = ffmpegService.CreateWatermarkCommand();
                     var result = await command.ExecuteAsync(new WatermarkModel
                     {
@@ -75,19 +75,15 @@ namespace FFmpeg.API.Endpoints
                         return Results.Problem("Failed to add watermark: " + result.ErrorMessage, statusCode: 500);
                     }
 
-                    // Read the output file
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
 
-                    // Clean up temporary files
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
-                    // Return the file
                     return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
                 }
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Error processing watermark request");
-                    // Clean up on error
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
                     throw;
                 }
@@ -97,8 +93,8 @@ namespace FFmpeg.API.Endpoints
                 logger.LogError(ex, "Error in AddWatermark endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
-
         }
+
         private static async Task<IResult> ChangeBrightnessContrast(
             HttpContext context,
             [FromForm] BrightnessContrastDto dto)
@@ -158,6 +154,29 @@ namespace FFmpeg.API.Endpoints
             {
                 logger.LogError(ex, "Error in ChangeBrightnessContrast endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
+        // הפונקציה החדשה שלנו לטיפול בשינוי מהירות
+        private static async Task<IResult> ChangeSpeed(
+            [FromBody] ChangeSpeedRequest request,
+            [FromServices] IVideoService videoService,
+            [FromServices] ILogger<Program> logger)
+        {
+            try
+            {
+                if (request == null || string.IsNullOrEmpty(request.InputPath))
+                {
+                    return Results.BadRequest("Invalid request data. InputPath is required.");
+                }
+
+                await videoService.ChangeVideoSpeedAsync(request.InputPath, request.SpeedMultiplier, request.OutputPath);
+                return Results.Ok(new { Message = "Video speed changed successfully." });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error processing video speed change");
+                return Results.Problem("Error processing video: " + ex.Message, statusCode: 500);
             }
         }
     }
