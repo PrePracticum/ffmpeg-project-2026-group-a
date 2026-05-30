@@ -28,6 +28,9 @@ namespace FFmpeg.API.Endpoints
             app.MapPost("/api/video/extract-frame", ExtractFrame)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
+            app.MapPost("/api/video/gif-video", CreateGif)
+               .DisableAntiforgery()
+               .WithMetadata(new RequestSizeLimitAttribute(104857600));
         }
 
         private static async Task<IResult> AddWatermark(
@@ -232,6 +235,62 @@ namespace FFmpeg.API.Endpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in ExtractFrame endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+        private static async Task<IResult> CreateGif(
+        HttpContext context,
+        [FromForm] GifFromVideoDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(".gif");
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+                    var command = ffmpegService.CreateGifFromVideoCommand();
+
+                    var result = await command.ExecuteAsync(new GifFromVideoModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to create GIF: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "image/gif", dto.OutputGifName ?? "output.gif");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing gif request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in CreateGif endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }

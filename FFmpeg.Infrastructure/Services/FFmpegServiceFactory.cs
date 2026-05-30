@@ -16,6 +16,8 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<WatermarkModel> CreateWatermarkCommand();
         ///
         ICommand<ExtractFrameModel> CreateExtractFrameCommand();
+
+        ICommand<GifFromVideoModel> CreateGifFromVideoCommand();
     }
 
     public class FFmpegServiceFactory : IFFmpegServiceFactory
@@ -42,6 +44,10 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<ExtractFrameModel> CreateExtractFrameCommand()
         {
             return new ExtractFrameCommand(_executor, _commandBuilder);
+        }
+        public ICommand<GifFromVideoModel> CreateGifFromVideoCommand()
+        {
+            return new GifFromVideoCommand(_executor, _commandBuilder);
         }
     }
 }
