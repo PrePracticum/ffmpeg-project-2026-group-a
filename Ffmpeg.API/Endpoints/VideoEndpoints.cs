@@ -29,9 +29,12 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
-            app.MapPost("/api/video/remove-audio", RemoveAudio)
-                .DisableAntiforgery()
-                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+            app.MapPost("/api/video/convert", ConvertVideo)
+                            .DisableAntiforgery()
+                            .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
+           app.MapPost("/api/video/remove-audio", RemoveAudio)
+                     .DisableAntiforgery()
+                     .WithMetadata(new RequestSizeLimitAttribute(104857600));
         }
 
         private static async Task<IResult> AddWatermark(
@@ -107,8 +110,6 @@ namespace FFmpeg.API.Endpoints
             }
 
         }
-
-
         private static async Task<IResult> ChangeBrightnessContrast(
             HttpContext context,
             [FromForm] BrightnessContrastDto dto)
@@ -170,7 +171,6 @@ namespace FFmpeg.API.Endpoints
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
-
 
         private static async Task<IResult> ExtractFrame(
              HttpContext context,
@@ -243,76 +243,146 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
-        private static async Task<IResult> RemoveAudio(
-            HttpContext context,
-            [FromForm] AudioRemovalDto dto)
+        private static async Task<IResult> ConvertVideo(
+    HttpContext context,
+    [FromForm] ConvertVideoDto dto)
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
-        
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
             var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
 
             try
             {
-                // 1. אימות הבקשה
                 if (dto.VideoFile == null)
                 {
                     return Results.BadRequest("Video file is required");
                 }
 
-                // 2. שמירת הקובץ שהועלה
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
 
-                // 3. יצירת שם קובץ לפלט
-                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string extension = string.IsNullOrEmpty(dto.TargetFormat) ? ".avi" : dto.TargetFormat;
+                if (!extension.StartsWith("."))
+                {
+                    extension = "." + extension;
+                }
+
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
 
-                // מעקב אחרי קבצים לצורך מחיקה בסיום
                 List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                // === התיקון כאן: משיגים את הנתיב המלא לקבצים בתוך השרת ===
+                string fullInputPath = fileService.GetFullInputPath(videoFileName);
+                string fullOutputPath = fileService.GetFullOutputPath(outputFileName);
 
                 try
                 {
-                    // 4. יצירה והפעלה של פקודת הסרת השמע
+                    var command = ffmpegService.CreateConvertVideoCommand();
 
-                    var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
-                    var command = ffmpegService.CreateAudioRemovalCommand();
-
-                    var result = await command.ExecuteAsync(new AudioRemovalModel
+                    // מעבירים ל-Model את הנתיב המלא במקום רק את שם הקובץ
+                    var result = await command.ExecuteAsync(new ConvertVideoModel
                     {
-                        InputFile = videoFileName,
-                        OutputFile = outputFileName
+                        InputVideoName = fullInputPath,
+                        OutputVideoName = fullOutputPath
                     });
 
-                    // 5. בדיקת הצלחה
                     if (!result.IsSuccess)
                     {
                         logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
                             result.ErrorMessage, result.CommandExecuted);
-                        return Results.Problem("Failed to remove audio: " + result.ErrorMessage, statusCode: 500);
+                        return Results.Problem("Failed to convert video: " + result.ErrorMessage, statusCode: 500);
                     }
 
-                    // 6. קריאת קובץ הפלט
-                    await Task.Delay(2000);
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
 
-                    // 7. ניקוי קבצים זמניים
-                   _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
-                    // 8. החזרת הקובץ ללקוח
-                    return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
+                    string downloadName = Path.GetFileNameWithoutExtension(dto.VideoFile.FileName) + extension;
+                    return Results.File(fileBytes, "video/avi", downloadName);
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Error processing audio removal request");
-                    // ניקוי במקרה של שגיאה בתוך תהליך העיבוד
+                    logger.LogError(ex, "Error processing video conversion request");
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
                     throw;
                 }
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in RemoveAudio endpoint");
+                logger.LogError(ex, "Error in ConvertVideo endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
+      
+       private static async Task<IResult> RemoveAudio(
+     HttpContext context,
+     [FromForm] AudioRemovalDto dto)
+ {
+     var fileService = context.RequestServices.GetRequiredService<IFileService>();
+ 
+     var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+     try
+     {
+         // 1. אימות הבקשה
+         if (dto.VideoFile == null)
+         {
+             return Results.BadRequest("Video file is required");
+         }
+
+         // 2. שמירת הקובץ שהועלה
+         string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+
+         // 3. יצירת שם קובץ לפלט
+         string extension = Path.GetExtension(dto.VideoFile.FileName);
+         string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+         // מעקב אחרי קבצים לצורך מחיקה בסיום
+         List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+         try
+         {
+             // 4. יצירה והפעלה של פקודת הסרת השמע
+
+             var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+             var command = ffmpegService.CreateAudioRemovalCommand();
+
+             var result = await command.ExecuteAsync(new AudioRemovalModel
+             {
+                 InputFile = videoFileName,
+                 OutputFile = outputFileName
+             });
+
+             // 5. בדיקת הצלחה
+             if (!result.IsSuccess)
+             {
+                 logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                     result.ErrorMessage, result.CommandExecuted);
+                 return Results.Problem("Failed to remove audio: " + result.ErrorMessage, statusCode: 500);
+             }
+
+             // 6. קריאת קובץ הפלט
+             await Task.Delay(2000);
+             byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+
+             // 7. ניקוי קבצים זמניים
+            _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+             // 8. החזרת הקובץ ללקוח
+             return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
+         }
+         catch (Exception ex)
+         {
+             logger.LogError(ex, "Error processing audio removal request");
+             // ניקוי במקרה של שגיאה בתוך תהליך העיבוד
+             _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+             throw;
+         }
+     }
+     catch (Exception ex)
+     {
+         logger.LogError(ex, "Error in RemoveAudio endpoint");
+         return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+     }
+ }
     }
 }

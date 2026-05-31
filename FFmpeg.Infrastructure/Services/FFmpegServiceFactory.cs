@@ -17,6 +17,8 @@ namespace FFmpeg.Infrastructure.Services
         ///
         ICommand<ExtractFrameModel> CreateExtractFrameCommand();
         ICommand<AudioRemovalModel> CreateAudioRemovalCommand();
+
+        ICommand<ConvertVideoModel> CreateConvertVideoCommand();
     }
 
     public class FFmpegServiceFactory : IFFmpegServiceFactory
@@ -48,6 +50,9 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<AudioRemovalModel> CreateAudioRemovalCommand()
         {
             return new AudioRemovalCommand(_executor, _commandBuilder);
+        public ICommand<ConvertVideoModel> CreateConvertVideoCommand()
+        {
+            return new ConvertVideoCommand(_executor);
         }
     }
 }
