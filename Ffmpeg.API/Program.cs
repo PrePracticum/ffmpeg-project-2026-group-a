@@ -42,7 +42,6 @@ builder.Services.AddScoped<IFFmpegServiceFactory>(provider =>
 // Add file service for handling temporary files
 builder.Services.AddScoped<IFileService, FileService>();
 
-
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
