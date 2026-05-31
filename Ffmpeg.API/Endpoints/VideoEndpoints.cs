@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using System;
@@ -243,6 +243,7 @@ namespace FFmpeg.API.Endpoints
     [FromForm] FFmpeg.API.DTOs.EchoDto dto)
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
             var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
 
             try
@@ -261,9 +262,7 @@ namespace FFmpeg.API.Endpoints
 
                 try
                 {
-                    var executor = context.RequestServices.GetRequiredService<FFmpeg.Infrastructure.Services.FFmpegExecutor>();
-                    var builder = context.RequestServices.GetRequiredService<FFmpeg.Infrastructure.Commands.ICommandBuilder>();
-                    var command = new Ffmpeg.Command.Commands.EchoCommand(executor, builder);
+                    var command = ffmpegService.CreateEchoCommand();
 
                     var result = await command.ExecuteAsync(new FFmpeg.Core.Models.EchoModel
                     {
