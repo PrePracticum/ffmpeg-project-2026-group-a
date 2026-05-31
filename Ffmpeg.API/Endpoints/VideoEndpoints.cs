@@ -24,6 +24,9 @@ namespace FFmpeg.API.Endpoints
             app.MapPost("/api/video/brightness-contrast", ChangeBrightnessContrast)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
+            app.MapPost("/api/video/text-animation", AddTextAnimation)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
         }
 
         private static async Task<IResult> AddWatermark(
@@ -160,5 +163,77 @@ namespace FFmpeg.API.Endpoints
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
+        private static async Task<IResult> AddTextAnimation(
+            HttpContext context,
+            [FromForm] TextAnimationDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null || string.IsNullOrEmpty(dto.TextContent))
+                {
+                    return Results.BadRequest("Video file and text content are required");
+                }
+
+                // שמירת הקובץ שהועלה
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+
+                // יצירת שם קובץ פלט ייחודי
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                // מערך לקבצים זמניים לניקוי
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    // הזרקת ה-Dependencies להרצת הפקודה
+                    var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
+                    var builder = context.RequestServices.GetRequiredService<FFmpeg.Infrastructure.Commands.ICommandBuilder>();
+
+                    // יצירת והפעלת ה-Command החדש
+                    var command = new FFmpeg.Infrastructure.Commands.TextAnimationCommand(executor, builder);
+
+                    var result = await command.ExecuteAsync(new TextAnimationModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        TextContent = dto.TextContent,
+                        Color = dto.Color,
+                        Size = dto.Size,
+                        IsAnimated = dto.IsAnimated
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to add text/animation: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    // קריאת קובץ המוצא והחזרתו למשתמש
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+
+                    // ניקוי קבצים זמניים ברקע
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing text animation request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in AddTextAnimation endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
     }
 }
