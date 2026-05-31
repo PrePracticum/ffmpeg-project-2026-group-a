@@ -1,16 +1,17 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using FFmpeg.API.DTOs;
+using FFmpeg.Core.Interfaces;
+using FFmpeg.Core.Models;
+using FFmpeg.Infrastructure.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using FFmpeg.API.DTOs;
-using FFmpeg.Core.Interfaces;
-using FFmpeg.Core.Models;
-using FFmpeg.Infrastructure.Services;
-using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.Builder;
 
 namespace FFmpeg.API.Endpoints
 {
@@ -26,9 +27,9 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
-            // הניתוב החדש שלנו לשינוי מהירות
             app.MapPost("/api/video/change-speed", ChangeSpeed)
-                .DisableAntiforgery();
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
         }
 
         private static async Task<IResult> AddWatermark(
@@ -157,27 +158,49 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
-        // הפונקציה החדשה שלנו לטיפול בשינוי מהירות
+        // הפונקציה המתוקנת לשינוי מהירות
         private static async Task<IResult> ChangeSpeed(
-            [FromBody] ChangeSpeedRequest request,
-            [FromServices] IVideoService videoService,
-            [FromServices] ILogger<Program> logger)
+     HttpContext context,
+     [FromForm] ChangeSpeedDto dto,
+     [FromServices] IVideoService videoService,
+     [FromServices] ILogger<Program> logger)
         {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+
             try
             {
-                if (request == null || string.IsNullOrEmpty(request.InputPath))
-                {
-                    return Results.BadRequest("Invalid request data. InputPath is required.");
-                }
+                if (dto.VideoFile == null) return Results.BadRequest("Video file is required");
+                if (dto.SpeedMultiplier <= 0) return Results.BadRequest("Speed multiplier must be greater than 0");
 
-                await videoService.ChangeVideoSpeedAsync(request.InputPath, request.SpeedMultiplier, request.OutputPath);
-                return Results.Ok(new { Message = "Video speed changed successfully." });
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    // מעבירים את השמות הקצרים (VideoService כבר יבנה מהם את הנתיב המלא לבד!)
+                    await videoService.ChangeVideoSpeedAsync(videoFileName, dto.SpeedMultiplier, outputFileName);
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", "speed_changed_" + dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing speed change");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error processing video speed change");
-                return Results.Problem("Error processing video: " + ex.Message, statusCode: 500);
+                logger.LogError(ex, "Error in ChangeSpeed endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
     }
+   
 }

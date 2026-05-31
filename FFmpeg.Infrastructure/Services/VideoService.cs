@@ -12,31 +12,36 @@ namespace FFmpeg.Infrastructure.Services
     {
         private readonly IConfiguration _configuration;
 
-        // הוספנו פונקציה בונה (Constructor) שמקבלת את קובץ ההגדרות
         public VideoService(IConfiguration configuration)
         {
             _configuration = configuration;
         }
 
-        public async Task ChangeVideoSpeedAsync(string inputPath, double speedMultiplier, string outputPath)
+        public async Task ChangeVideoSpeedAsync(string inputFileName, double speedMultiplier, string outputFileName)
         {
-            // קריאת הנתיב מתוך appsettings.json
-            string ffmpegDir = _configuration["FFmpeg:Path"];
+            // 1. קריאת נתיב הבסיס מתוך ההגדרות (appsettings.json)
+            string basePath = _configuration["FFmpeg:Path"] ?? throw new InvalidOperationException("FFmpeg:Path configuration is missing");
+            basePath = Environment.ExpandEnvironmentVariables(basePath);
+            string ffmpegExePath = Path.Combine(basePath, "ffmpeg.exe");
 
-            // המרת משתנה הסביבה (USERPROFILE) לנתיב אמיתי במחשב
-            ffmpegDir = Environment.ExpandEnvironmentVariables(ffmpegDir);
+            // 2. הפתרון הקסום: בניית הנתיבים המלאים בדיוק לאותן תיקיות ש-FileService עובד איתן!
+            string inputFullPath = Path.Combine(basePath, "Input", inputFileName);
+            string outputFullPath = Path.Combine(basePath, "Output", outputFileName);
 
-            // חיבור הנתיב של התיקייה יחד עם שם הקובץ
-            string ffmpegExePath = Path.Combine(ffmpegDir, "ffmpeg.exe");
+            // 3. בדיקה שהקובץ קיים (עכשיו זה יעבוד כי יש לו נתיב פיזי אמיתי!)
+            if (!File.Exists(inputFullPath))
+            {
+                throw new FileNotFoundException($"The input file was not found at the physical path: {inputFullPath}");
+            }
 
+            // 4. הרצת הפקודה
             double pts = 1.0 / speedMultiplier;
             string ptsString = pts.ToString(CultureInfo.InvariantCulture);
-
-            string arguments = $"-y -i \"{inputPath}\" -filter:v \"setpts={ptsString}*PTS\" \"{outputPath}\"";
+            string arguments = $"-y -i \"{inputFullPath}\" -filter:v \"setpts={ptsString}*PTS\" \"{outputFullPath}\"";
 
             var processInfo = new ProcessStartInfo
             {
-                FileName = ffmpegExePath, // שימוש בנתיב המדויק שקראנו מההגדרות
+                FileName = ffmpegExePath,
                 Arguments = arguments,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
