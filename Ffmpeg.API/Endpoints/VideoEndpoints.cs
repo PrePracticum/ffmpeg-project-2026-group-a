@@ -28,6 +28,10 @@ namespace FFmpeg.API.Endpoints
             app.MapPost("/api/video/extract-frame", ExtractFrame)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
+            app.MapPost("/api/video/convert", ConvertVideo)
+                            .DisableAntiforgery()
+                            .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
         }
 
         private static async Task<IResult> AddWatermark(
@@ -232,6 +236,37 @@ namespace FFmpeg.API.Endpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in ExtractFrame endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
+      private static async Task<IResult> ConvertVideo(
+            [FromBody] ConvertVideoDto dto,
+            [FromServices] IFFmpegServiceFactory factory,
+            [FromServices] ILogger<Program> logger)
+        {
+            try
+            {
+                var model = new ConvertVideoModel
+                {
+                    InputVideoName = dto.InputVideoName,
+                    OutputVideoName = dto.OutputVideoName
+                };
+
+                var command = factory.CreateConvertVideoCommand();
+                var result = await command.ExecuteAsync(model);
+
+                if (!result.IsSuccess)
+                {
+                    logger.LogError("FFmpeg conversion failed: {ErrorMessage}", result.ErrorMessage);
+                    return Results.BadRequest("Failed to convert video: " + result.ErrorMessage);
+                }
+
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in ConvertVideo endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
