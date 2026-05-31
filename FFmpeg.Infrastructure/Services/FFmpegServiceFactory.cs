@@ -14,8 +14,8 @@ namespace FFmpeg.Infrastructure.Services
     public interface IFFmpegServiceFactory
     {
         ICommand<WatermarkModel> CreateWatermarkCommand();
-        ///
         ICommand<ExtractFrameModel> CreateExtractFrameCommand();
+        ICommand<EchoModel> CreateEchoCommand();
     }
 
     public class FFmpegServiceFactory : IFFmpegServiceFactory
@@ -38,10 +38,15 @@ namespace FFmpeg.Infrastructure.Services
         {
             return new WatermarkCommand(_executor, _commandBuilder);
         }
-        //
+
         public ICommand<ExtractFrameModel> CreateExtractFrameCommand()
         {
             return new ExtractFrameCommand(_executor, _commandBuilder);
+        }
+
+        public ICommand<EchoModel> CreateEchoCommand()
+        {
+            return new EchoCommand(_executor, _commandBuilder);
         }
     }
 }
