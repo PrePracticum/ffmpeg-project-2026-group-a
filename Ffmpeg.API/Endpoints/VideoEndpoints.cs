@@ -174,11 +174,12 @@ namespace FFmpeg.API.Endpoints
         }
 
         private static async Task<IResult> ReverseVideo(
-                HttpContext context,
-                [FromForm] ReverseVideoDto dto)
+            HttpContext context,
+            [FromForm] ReverseVideoDto dto)
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
             var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            var ffmpegFactory = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
 
             try
             {
@@ -187,21 +188,16 @@ namespace FFmpeg.API.Endpoints
                     return Results.BadRequest("Video file is required");
                 }
 
-                // Save uploaded file
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
 
-                // Generate output filename
                 string extension = Path.GetExtension(dto.VideoFile.FileName);
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
 
-                // Track files to clean up
                 List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
 
                 try
                 {
-                    var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
-                    var builder = context.RequestServices.GetRequiredService<FFmpeg.Infrastructure.Commands.ICommandBuilder>();
-                    var command = new FFmpeg.Infrastructure.Commands.ReverseVideoCommand(executor, builder);
+                    var command = ffmpegFactory.CreateReverseVideoCommand();
 
                     var result = await command.ExecuteAsync(new ReverseVideoModel
                     {
@@ -216,13 +212,10 @@ namespace FFmpeg.API.Endpoints
                         return Results.Problem("Failed to reverse video: " + result.ErrorMessage, statusCode: 500);
                     }
 
-                    // Read the output file
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
 
-                    // Clean up temporary files
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
-                    // Return the file
                     return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
                 }
                 catch (Exception ex)
@@ -238,7 +231,7 @@ namespace FFmpeg.API.Endpoints
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
-         private static async Task<IResult> ExtractFrame(
+        private static async Task<IResult> ExtractFrame(
              HttpContext context,
              [FromForm] ExtractFrameDto dto)
         {
