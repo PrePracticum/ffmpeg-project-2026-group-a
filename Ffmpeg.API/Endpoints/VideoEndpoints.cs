@@ -1,17 +1,17 @@
-﻿using FFmpeg.API.DTOs;
-using FFmpeg.Core.Interfaces;
-using FFmpeg.Core.Models;
-using FFmpeg.Infrastructure.Services;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using FFmpeg.API.DTOs;
+using FFmpeg.Core.Interfaces;
+using FFmpeg.Core.Models;
+using FFmpeg.Infrastructure.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace FFmpeg.API.Endpoints
 {
@@ -27,20 +27,22 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
+            // הניתוב המעודכן שלנו לשינוי מהירות - כולל הגבלת גודל להעלאת קבצים
             app.MapPost("/api/video/change-speed", ChangeSpeed)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
+
             app.MapPost("/api/video/reverse", ReverseVideo)
-                    .DisableAntiforgery()
-                    .WithMetadata(new RequestSizeLimitAttribute(104857600));
-            
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
             app.MapPost("/api/video/extract-frame", ExtractFrame)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
             app.MapPost("/api/video/convert", ConvertVideo)
-                            .DisableAntiforgery()
-                            .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
         }
 
         private static async Task<IResult> AddWatermark(
@@ -169,21 +171,56 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
-        // הפונקציה המתוקנת לשינוי מהירות
+        // הפונקציה המעודכת והסופית לשינוי מהירות (עם העלאת קבצים אמיתית)
         private static async Task<IResult> ChangeSpeed(
-     HttpContext context,
-     [FromForm] ChangeSpeedDto dto,
-     [FromServices] IVideoService videoService,
-     [FromServices] ILogger<Program> logger)
+            HttpContext context,
+            [FromForm] ChangeSpeedDto dto,
+            [FromServices] IVideoService videoService,
+            [FromServices] ILogger<Program> logger)
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
 
             try
             {
-                if (dto.VideoFile == null) return Results.BadRequest("Video file is required");
-                if (dto.SpeedMultiplier <= 0) return Results.BadRequest("Speed multiplier must be greater than 0");
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+                if (dto.SpeedMultiplier <= 0)
+                {
+                    return Results.BadRequest("Speed multiplier must be greater than 0");
+                }
 
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    await videoService.ChangeVideoSpeedAsync(videoFileName, dto.SpeedMultiplier, outputFileName);
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", "speed_changed_" + dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing speed change");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in ChangeSpeed endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
         private static async Task<IResult> ReverseVideo(
             HttpContext context,
             [FromForm] ReverseVideoDto dto)
@@ -208,17 +245,6 @@ namespace FFmpeg.API.Endpoints
 
                 try
                 {
-                    // מעבירים את השמות הקצרים (VideoService כבר יבנה מהם את הנתיב המלא לבד!)
-                    await videoService.ChangeVideoSpeedAsync(videoFileName, dto.SpeedMultiplier, outputFileName);
-
-                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
-                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
-
-                    return Results.File(fileBytes, "video/mp4", "speed_changed_" + dto.VideoFile.FileName);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Error processing speed change");
                     var command = ffmpegFactory.CreateReverseVideoCommand();
 
                     var result = await command.ExecuteAsync(new ReverseVideoModel
@@ -253,6 +279,7 @@ namespace FFmpeg.API.Endpoints
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
+
         private static async Task<IResult> ExtractFrame(
              HttpContext context,
              [FromForm] ExtractFrameDto dto)
@@ -280,10 +307,6 @@ namespace FFmpeg.API.Endpoints
 
                 try
                 {
-                    //var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
-                    //var builder = context.RequestServices.GetRequiredService<FFmpeg.Infrastructure.Commands.ICommandBuilder>();
-                    //var command = new FFmpeg.Infrastructure.Commands.ExtractFrameCommand(executor, builder);
-
                     var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
                     var command = ffmpegService.CreateExtractFrameCommand();
 
@@ -325,8 +348,8 @@ namespace FFmpeg.API.Endpoints
         }
 
         private static async Task<IResult> ConvertVideo(
-    HttpContext context,
-    [FromForm] ConvertVideoDto dto)
+            HttpContext context,
+            [FromForm] ConvertVideoDto dto)
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
             var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
@@ -387,11 +410,9 @@ namespace FFmpeg.API.Endpoints
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in ChangeSpeed endpoint");
                 logger.LogError(ex, "Error in ConvertVideo endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
     }
-   
 }
