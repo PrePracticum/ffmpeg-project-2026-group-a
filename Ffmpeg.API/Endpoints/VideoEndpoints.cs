@@ -12,6 +12,7 @@ using FFmpeg.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using FFmpeg.Infrastructure.Commands;
 
 namespace FFmpeg.API.Endpoints
 {
@@ -21,16 +22,15 @@ namespace FFmpeg.API.Endpoints
         {
             app.MapPost("/api/video/watermark", AddWatermark)
                 .DisableAntiforgery()
-                .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
             app.MapPost("/api/video/brightness-contrast", ChangeBrightnessContrast)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
-            // הניתוב הרשמי והמעודכן שלך לשינוי מהירות!
             app.MapPost("/api/video/change-speed", ChangeSpeed)
                 .DisableAntiforgery()
-                .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
             app.MapPost("/api/video/reverse", ReverseVideo)
                 .DisableAntiforgery()
@@ -42,7 +42,7 @@ namespace FFmpeg.API.Endpoints
 
             app.MapPost("/api/video/convert", ConvertVideo)
                 .DisableAntiforgery()
-                .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
         }
 
         private static async Task<IResult> AddWatermark(
@@ -90,7 +90,6 @@ namespace FFmpeg.API.Endpoints
                     }
 
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
-
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
                     return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
@@ -124,7 +123,6 @@ namespace FFmpeg.API.Endpoints
                 }
 
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
-
                 string extension = Path.GetExtension(dto.VideoFile.FileName);
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
 
@@ -133,8 +131,8 @@ namespace FFmpeg.API.Endpoints
                 try
                 {
                     var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
-                    var builder = context.RequestServices.GetRequiredService<FFmpeg.Infrastructure.Commands.ICommandBuilder>();
-                    var command = new FFmpeg.Infrastructure.Commands.BrightnessContrastCommand(executor, builder);
+                    var builder = context.RequestServices.GetRequiredService<ICommandBuilder>();
+                    var command = new BrightnessContrastCommand(executor, builder);
 
                     var result = await command.ExecuteAsync(new BrightnessContrastModel
                     {
@@ -152,7 +150,6 @@ namespace FFmpeg.API.Endpoints
                     }
 
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
-
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
                     return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
@@ -171,16 +168,12 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
-        // המשימה שלך כאן! מעודכנת ומיושרת עם אתחול עצמאי כדי לעקוף את חסימת ה-Program.cs
         private static async Task<IResult> ChangeSpeed(
             HttpContext context,
             [FromForm] ChangeSpeedDto dto,
             [FromServices] ILogger<Program> logger)
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
-
-            // התיקון העוקף: מאתחלים את השירות ידנית ומקומית
-            IVideoService videoService = new FFmpeg.Infrastructure.Services.VideoService();
 
             try
             {
@@ -204,17 +197,32 @@ namespace FFmpeg.API.Endpoints
 
                 try
                 {
-                    await videoService.ChangeVideoSpeedAsync(fullInputPath, dto.SpeedMultiplier, fullOutputPath);
+                    var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
+                    var builder = context.RequestServices.GetRequiredService<ICommandBuilder>();
+                    var command = new ChangeSpeedCommand(executor, builder);
+
+                    var result = await command.ExecuteAsync(new ChangeSpeedModel
+                    {
+                        InputFile = fullInputPath,
+                        OutputFile = fullOutputPath,
+                        SpeedMultiplier = dto.SpeedMultiplier
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to change video speed: " + result.ErrorMessage, statusCode: 500);
+                    }
 
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
-
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
-                    return Results.File(fileBytes, "video/mp4", "speed_changed_" + dto.VideoFile.FileName);
+                    return Results.File(fileBytes, "video/mp4", "speed_" + dto.VideoFile.FileName);
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Error processing speed change");
+                    logger.LogError(ex, "Error processing speed change request");
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
                     throw;
                 }
@@ -242,7 +250,6 @@ namespace FFmpeg.API.Endpoints
                 }
 
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
-
                 string extension = Path.GetExtension(dto.VideoFile.FileName);
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
 
@@ -251,7 +258,6 @@ namespace FFmpeg.API.Endpoints
                 try
                 {
                     var command = ffmpegFactory.CreateReverseVideoCommand();
-
                     var result = await command.ExecuteAsync(new ReverseVideoModel
                     {
                         InputFile = videoFileName,
@@ -266,7 +272,6 @@ namespace FFmpeg.API.Endpoints
                     }
 
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
-
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
                     return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
@@ -330,7 +335,6 @@ namespace FFmpeg.API.Endpoints
                     }
 
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
-
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
                     string contentType = extension.ToLower() == ".jpg" || extension.ToLower() == ".jpeg" ? "image/jpeg" : "image/png";
@@ -400,7 +404,6 @@ namespace FFmpeg.API.Endpoints
                     }
 
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
-
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
                     string downloadName = Path.GetFileNameWithoutExtension(dto.VideoFile.FileName) + extension;
