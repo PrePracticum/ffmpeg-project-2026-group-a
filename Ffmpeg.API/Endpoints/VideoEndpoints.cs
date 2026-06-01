@@ -10,6 +10,8 @@ using FFmpeg.Core.Interfaces;
 using FFmpeg.Core.Models;
 using FFmpeg.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace FFmpeg.API.Endpoints
 {
@@ -25,17 +27,22 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
+            // הניתוב הרשמי והמעודכן שלך לשינוי מהירות!
+            app.MapPost("/api/video/change-speed", ChangeSpeed)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
+
             app.MapPost("/api/video/reverse", ReverseVideo)
-                    .DisableAntiforgery()
-                    .WithMetadata(new RequestSizeLimitAttribute(104857600));
-            
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
             app.MapPost("/api/video/extract-frame", ExtractFrame)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
             app.MapPost("/api/video/convert", ConvertVideo)
-                            .DisableAntiforgery()
-                            .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
         }
 
         private static async Task<IResult> AddWatermark(
@@ -44,30 +51,25 @@ namespace FFmpeg.API.Endpoints
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
             var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
-            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>(); // or a specific logger type
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
 
             try
             {
-                // Validate request
                 if (dto.VideoFile == null || dto.WatermarkFile == null)
                 {
                     return Results.BadRequest("Video file and watermark file are required");
                 }
 
-                // Save uploaded files
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
                 string watermarkFileName = await fileService.SaveUploadedFileAsync(dto.WatermarkFile);
 
-                // Generate output filename
                 string extension = Path.GetExtension(dto.VideoFile.FileName);
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
 
-                // Track files to clean up
                 List<string> filesToCleanup = new List<string> { videoFileName, watermarkFileName, outputFileName };
 
                 try
                 {
-                    // Create and execute the watermark command
                     var command = ffmpegService.CreateWatermarkCommand();
                     var result = await command.ExecuteAsync(new WatermarkModel
                     {
@@ -87,19 +89,15 @@ namespace FFmpeg.API.Endpoints
                         return Results.Problem("Failed to add watermark: " + result.ErrorMessage, statusCode: 500);
                     }
 
-                    // Read the output file
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
 
-                    // Clean up temporary files
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
-                    // Return the file
                     return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
                 }
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Error processing watermark request");
-                    // Clean up on error
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
                     throw;
                 }
@@ -109,8 +107,8 @@ namespace FFmpeg.API.Endpoints
                 logger.LogError(ex, "Error in AddWatermark endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
-
         }
+
         private static async Task<IResult> ChangeBrightnessContrast(
             HttpContext context,
             [FromForm] BrightnessContrastDto dto)
@@ -173,6 +171,61 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
+        // המשימה שלך כאן! מעודכנת ומיושרת עם אתחול עצמאי כדי לעקוף את חסימת ה-Program.cs
+        private static async Task<IResult> ChangeSpeed(
+            HttpContext context,
+            [FromForm] ChangeSpeedDto dto,
+            [FromServices] ILogger<Program> logger)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+
+            // התיקון העוקף: מאתחלים את השירות ידנית ומקומית
+            IVideoService videoService = new FFmpeg.Infrastructure.Services.VideoService();
+
+            try
+            {
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+                if (dto.SpeedMultiplier <= 0)
+                {
+                    return Results.BadRequest("Speed multiplier must be greater than 0");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                string fullInputPath = fileService.GetFullInputPath(videoFileName);
+                string fullOutputPath = fileService.GetFullOutputPath(outputFileName);
+
+                try
+                {
+                    await videoService.ChangeVideoSpeedAsync(fullInputPath, dto.SpeedMultiplier, fullOutputPath);
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", "speed_changed_" + dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing speed change");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in ChangeSpeed endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
         private static async Task<IResult> ReverseVideo(
             HttpContext context,
             [FromForm] ReverseVideoDto dto)
@@ -231,6 +284,7 @@ namespace FFmpeg.API.Endpoints
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
+
         private static async Task<IResult> ExtractFrame(
              HttpContext context,
              [FromForm] ExtractFrameDto dto)
@@ -258,10 +312,6 @@ namespace FFmpeg.API.Endpoints
 
                 try
                 {
-                    //var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
-                    //var builder = context.RequestServices.GetRequiredService<FFmpeg.Infrastructure.Commands.ICommandBuilder>();
-                    //var command = new FFmpeg.Infrastructure.Commands.ExtractFrameCommand(executor, builder);
-
                     var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
                     var command = ffmpegService.CreateExtractFrameCommand();
 
@@ -303,8 +353,8 @@ namespace FFmpeg.API.Endpoints
         }
 
         private static async Task<IResult> ConvertVideo(
-    HttpContext context,
-    [FromForm] ConvertVideoDto dto)
+            HttpContext context,
+            [FromForm] ConvertVideoDto dto)
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
             var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
