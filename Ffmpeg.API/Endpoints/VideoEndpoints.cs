@@ -27,7 +27,7 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
-            // הניתוב המעודכן שלנו לשינוי מהירות - כולל הגבלת גודל להעלאת קבצים
+            // הניתוב הרשמי והמעודכן שלך לשינוי מהירות!
             app.MapPost("/api/video/change-speed", ChangeSpeed)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600)); // 100 MB
@@ -171,14 +171,16 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
-        // הפונקציה המעודכת והסופית לשינוי מהירות (עם העלאת קבצים אמיתית)
+        // המשימה שלך כאן! מעודכנת ומיושרת עם אתחול עצמאי כדי לעקוף את חסימת ה-Program.cs
         private static async Task<IResult> ChangeSpeed(
             HttpContext context,
             [FromForm] ChangeSpeedDto dto,
-            [FromServices] IVideoService videoService,
             [FromServices] ILogger<Program> logger)
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
+
+            // התיקון העוקף: מאתחלים את השירות ידנית ומקומית
+            IVideoService videoService = new FFmpeg.Infrastructure.Services.VideoService();
 
             try
             {
@@ -197,9 +199,12 @@ namespace FFmpeg.API.Endpoints
 
                 List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
 
+                string fullInputPath = fileService.GetFullInputPath(videoFileName);
+                string fullOutputPath = fileService.GetFullOutputPath(outputFileName);
+
                 try
                 {
-                    await videoService.ChangeVideoSpeedAsync(videoFileName, dto.SpeedMultiplier, outputFileName);
+                    await videoService.ChangeVideoSpeedAsync(fullInputPath, dto.SpeedMultiplier, fullOutputPath);
 
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
 

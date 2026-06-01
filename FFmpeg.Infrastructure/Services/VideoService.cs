@@ -1,45 +1,45 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using FFmpeg.Core.Interfaces;
-using Microsoft.Extensions.Configuration;
 
 namespace FFmpeg.Infrastructure.Services
 {
     public class VideoService : IVideoService
     {
-        private readonly IConfiguration _configuration;
-
-        public VideoService(IConfiguration configuration)
+        public async Task ChangeVideoSpeedAsync(string inputPath, double speedMultiplier, string outputPath)
         {
-            _configuration = configuration;
-        }
-
-        public async Task ChangeVideoSpeedAsync(string inputFileName, double speedMultiplier, string outputFileName)
-        {
-            // 1. קריאת נתיב הבסיס מתוך ההגדרות (appsettings.json)
-            string basePath = _configuration["FFmpeg:Path"] ?? throw new InvalidOperationException("FFmpeg:Path configuration is missing");
-            basePath = Environment.ExpandEnvironmentVariables(basePath);
-            string ffmpegExePath = Path.Combine(basePath, "ffmpeg.exe");
-
-            // 2. הפתרון הקסום: בניית הנתיבים המלאים בדיוק לאותן תיקיות ש-FileService עובד איתן!
-            string inputFullPath = Path.Combine(basePath, "Input", inputFileName);
-            string outputFullPath = Path.Combine(basePath, "Output", outputFileName);
-
-            // 3. בדיקה שהקובץ קיים (עכשיו זה יעבוד כי יש לו נתיב פיזי אמיתי!)
-            if (!File.Exists(inputFullPath))
+            if (!File.Exists(inputPath))
             {
-                throw new FileNotFoundException($"The input file was not found at the physical path: {inputFullPath}");
+                throw new FileNotFoundException($"Input video file not found at: {inputPath}");
             }
 
-            // 4. הרצת הפקודה
-            double pts = 1.0 / speedMultiplier;
-            string ptsString = pts.ToString(CultureInfo.InvariantCulture);
-            string arguments = $"-y -i \"{inputFullPath}\" -filter:v \"setpts={ptsString}*PTS\" \"{outputFullPath}\"";
+            // חישוב המהירות עבור FFmpeg
+            double videoScale = 1.0 / speedMultiplier;
+            string arguments = $"-i \"{inputPath}\" -filter_complex \"[0:v]setpts={videoScale}*PTS[v];[0:a]atempo={speedMultiplier}[a]\" -map \"[v]\" -map \"[a]\" -y \"{outputPath}\"";
 
-            var processInfo = new ProcessStartInfo
+            // הגדרת נתיבים אפשריים לקובץ ffmpeg.exe במחשב שלך
+            string ffmpegExePath = "ffmpeg"; // ברירת מחדל מערכתית
+
+            string path1 = Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg.exe"); // תיקיית ה-API הראשית
+            string path2 = Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe"); // תיקיית ה-bin/Debug הפנימית
+
+            if (File.Exists(path1))
+            {
+                ffmpegExePath = path1;
+            }
+            else if (File.Exists(path2))
+            {
+                ffmpegExePath = path2;
+            }
+            else
+            {
+                // אם הוא לא מצא בשום מקום, נזרוק שגיאה ברורה שתסביר לנו איפה הוא חיפש
+                throw new FileNotFoundException($"ffmpeg.exe was not found! Please place it either in:\n1) {path1}\nOR\n2) {path2}");
+            }
+
+            var startInfo = new ProcessStartInfo
             {
                 FileName = ffmpegExePath,
                 Arguments = arguments,
@@ -49,16 +49,15 @@ namespace FFmpeg.Infrastructure.Services
                 CreateNoWindow = true
             };
 
-            using (var process = new Process { StartInfo = processInfo })
+            using (var process = new Process { StartInfo = startInfo })
             {
                 process.Start();
-
-                string errorOutput = await process.StandardError.ReadToEndAsync();
+                string errors = await process.StandardError.ReadToEndAsync();
                 await process.WaitForExitAsync();
 
                 if (process.ExitCode != 0)
                 {
-                    throw new Exception($"FFmpeg failed with exit code {process.ExitCode}. Error: {errorOutput}");
+                    throw new Exception($"FFmpeg speed change failed with exit code {process.ExitCode}. Details: {errors}");
                 }
             }
         }
