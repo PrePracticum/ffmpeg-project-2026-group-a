@@ -8,11 +8,12 @@ using System.Threading.Tasks;
 using FFmpeg.API.DTOs;
 using FFmpeg.Core.Interfaces;
 using FFmpeg.Core.Models;
-using FFmpeg.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using FFmpeg.Infrastructure.Commands;
+using FFmpeg.Infrastructure.Services;
+using FFmpeg.Infrastructure;
 
 namespace FFmpeg.API.Endpoints
 {
@@ -170,10 +171,11 @@ namespace FFmpeg.API.Endpoints
 
         private static async Task<IResult> ChangeSpeed(
             HttpContext context,
-            [FromForm] ChangeSpeedDto dto,
-            [FromServices] ILogger<Program> logger)
+            [FromForm] ChangeSpeedDto dto)
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var configuration = context.RequestServices.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
 
             try
             {
@@ -197,22 +199,43 @@ namespace FFmpeg.API.Endpoints
 
                 try
                 {
-                    var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
-                    var builder = context.RequestServices.GetRequiredService<ICommandBuilder>();
-                    var command = new ChangeSpeedCommand(executor, builder);
+                    double videoScale = 1.0 / dto.SpeedMultiplier;
 
-                    var result = await command.ExecuteAsync(new ChangeSpeedModel
+                    // Safe handling for audio multiplier (FFmpeg atempo filter is restricted between 0.5 and 2.0)
+                    string audioFilter = $"atempo={dto.SpeedMultiplier}";
+                    if (dto.SpeedMultiplier > 2.0)
                     {
-                        InputFile = fullInputPath,
-                        OutputFile = fullOutputPath,
-                        SpeedMultiplier = dto.SpeedMultiplier
-                    });
+                        audioFilter = "atempo=2.0,atempo=" + (dto.SpeedMultiplier / 2.0);
+                    }
+                    else if (dto.SpeedMultiplier < 0.5)
+                    {
+                        audioFilter = "atempo=0.5,atempo=" + (dto.SpeedMultiplier / 0.5);
+                    }
 
-                    if (!result.IsSuccess)
+                    string arguments = $"-i \"{fullInputPath}\" -filter_complex \"[0:v]setpts={videoScale}*PTS[v];[0:a]{audioFilter}[a]\" -map \"[v]\" -map \"[a]\" -c:v libx264 -pix_fmt yuv420p -y \"{fullOutputPath}\"";
+
+                    string ffmpegPath = configuration["FFmpeg:ExecutablePath"] ?? "ffmpeg";
+
+                    var startInfo = new System.Diagnostics.ProcessStartInfo
                     {
-                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
-                            result.ErrorMessage, result.CommandExecuted);
-                        return Results.Problem("Failed to change video speed: " + result.ErrorMessage, statusCode: 500);
+                        FileName = ffmpegPath,
+                        Arguments = arguments,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    using (var process = new System.Diagnostics.Process { StartInfo = startInfo })
+                    {
+                        process.Start();
+                        string errors = await process.StandardError.ReadToEndAsync();
+                        await process.WaitForExitAsync();
+
+                        if (process.ExitCode != 0)
+                        {
+                            logger.LogError("FFmpeg raw execution failed: {Errors}", errors);
+                            return Results.Problem("FFmpeg failed to process video speed. Technical details: " + errors, statusCode: 500);
+                        }
                     }
 
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
@@ -222,7 +245,7 @@ namespace FFmpeg.API.Endpoints
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Error processing speed change request");
+                    logger.LogError(ex, "Error executing FFmpeg process directly");
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
                     throw;
                 }

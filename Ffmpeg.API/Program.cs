@@ -42,8 +42,7 @@ builder.Services.AddScoped<IFFmpegServiceFactory>(provider =>
 // Add file service for handling temporary files
 builder.Services.AddScoped<IFileService, FileService>();
 
-// Register our new Video Service for speed manipulation
-builder.Services.AddScoped<IVideoService, VideoService>();
+
 
 var app = builder.Build();
 

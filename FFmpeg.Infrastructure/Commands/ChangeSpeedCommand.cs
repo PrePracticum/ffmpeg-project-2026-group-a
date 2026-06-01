@@ -1,37 +1,31 @@
-﻿using FFmpeg.Core.Models;
-using FFmpeg.Infrastructure.Commands;
+﻿using Ffmpeg.Command.Commands;
+using FFmpeg.Core.Models;
 using FFmpeg.Infrastructure.Services;
 using System;
-using System.IO;
 using System.Threading.Tasks;
 
 namespace FFmpeg.Infrastructure.Commands
 {
-    public class ChangeSpeedCommand
+    public class ChangeSpeedCommand : BaseCommand, ICommand<ChangeSpeedModel>
     {
-        private readonly FFmpegExecutor _executor;
-        private readonly ICommandBuilder _builder;
+        private readonly ICommandBuilder _commandBuilder;
 
-        public ChangeSpeedCommand(FFmpegExecutor executor, ICommandBuilder builder)
+        public ChangeSpeedCommand(FFmpegExecutor executor, ICommandBuilder commandBuilder)
+            : base(executor)
         {
-            _executor = executor;
-            _builder = builder;
+            _commandBuilder = commandBuilder ?? throw new ArgumentNullException(nameof(commandBuilder));
         }
 
-        public async Task<FFmpegResult> ExecuteAsync(ChangeSpeedModel model)
+        public async Task<CommandResult> ExecuteAsync(ChangeSpeedModel model)
         {
-            if (!File.Exists(model.InputFile))
-            {
-                throw new FileNotFoundException($"Input file not found: {model.InputFile}");
-            }
-
             double videoScale = 1.0 / model.SpeedMultiplier;
 
-            // Building the standard FFmpeg command arguments for video and audio speed adjustment
-            string arguments = $"-i \"{model.InputFile}\" -filter_complex \"[0:v]setpts={videoScale}*PTS[v];[0:a]atempo={model.SpeedMultiplier}\" -map \"[v]\" -map \"[a]\" -y \"{model.OutputFile}\"";
+            CommandBuilder = _commandBuilder
+                .SetInput(model.InputFile)
+                .AddOption($"-filter_complex \"[0:v]setpts={videoScale}*PTS[v];[0:a]atempo={model.SpeedMultiplier}\" -map \"[v]\" -map \"[a]\"")
+                .SetOutput(model.OutputFile, false);
 
-            // Using the project's native executor ensures it runs correctly on the teacher's environment
-            return await _executor.ExecuteArgsAsync(arguments);
+            return await RunAsync();
         }
     }
 }
