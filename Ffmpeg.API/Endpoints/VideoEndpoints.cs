@@ -25,6 +25,10 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
+            app.MapPost("/api/video/reverse", ReverseVideo)
+                    .DisableAntiforgery()
+                    .WithMetadata(new RequestSizeLimitAttribute(104857600));
+            
             app.MapPost("/api/video/extract-frame", ExtractFrame)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
@@ -172,6 +176,64 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
+        private static async Task<IResult> ReverseVideo(
+            HttpContext context,
+            [FromForm] ReverseVideoDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            var ffmpegFactory = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+
+            try
+            {
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    var command = ffmpegFactory.CreateReverseVideoCommand();
+
+                    var result = await command.ExecuteAsync(new ReverseVideoModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to reverse video: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing reverse video request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in ReverseVideo endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
         private static async Task<IResult> ExtractFrame(
              HttpContext context,
              [FromForm] ExtractFrameDto dto)
@@ -270,7 +332,6 @@ namespace FFmpeg.API.Endpoints
 
                 List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
 
-                // === התיקון כאן: משיגים את הנתיב המלא לקבצים בתוך השרת ===
                 string fullInputPath = fileService.GetFullInputPath(videoFileName);
                 string fullOutputPath = fileService.GetFullOutputPath(outputFileName);
 
@@ -278,7 +339,6 @@ namespace FFmpeg.API.Endpoints
                 {
                     var command = ffmpegService.CreateConvertVideoCommand();
 
-                    // מעבירים ל-Model את הנתיב המלא במקום רק את שם הקובץ
                     var result = await command.ExecuteAsync(new ConvertVideoModel
                     {
                         InputVideoName = fullInputPath,
