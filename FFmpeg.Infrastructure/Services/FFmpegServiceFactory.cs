@@ -15,6 +15,7 @@ namespace FFmpeg.Infrastructure.Services
     {
         ICommand<WatermarkModel> CreateWatermarkCommand();
         ICommand<ExtractFrameModel> CreateExtractFrameCommand();
+        ICommand<ExtractAudioModel> CreateExtractAudioCommand();
         ICommand<ConvertVideoModel> CreateConvertVideoCommand();
         ICommand<ReverseVideoModel> CreateReverseVideoCommand();
     }
@@ -45,6 +46,11 @@ namespace FFmpeg.Infrastructure.Services
             return new ExtractFrameCommand(_executor, _commandBuilder);
         }
 
+        public ICommand<ExtractAudioModel> CreateExtractAudioCommand()
+        {
+            return new ExtractAudioCommand(_executor);
+        }
+
         public ICommand<ConvertVideoModel> CreateConvertVideoCommand()
         {
             return new ConvertVideoCommand(_executor);
@@ -54,5 +60,6 @@ namespace FFmpeg.Infrastructure.Services
         {
             return new ReverseVideoCommand(_executor, _commandBuilder);
         }
+        
     }
 }
