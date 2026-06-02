@@ -17,6 +17,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<ExtractFrameModel> CreateExtractFrameCommand();
         ICommand<ConvertVideoModel> CreateConvertVideoCommand();
         ICommand<ReverseVideoModel> CreateReverseVideoCommand();
+        ICommand<MergeVideosModel> CreateMergeVideosCommand();
     }
 
     public class FFmpegServiceFactory : IFFmpegServiceFactory
@@ -53,6 +54,11 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<ReverseVideoModel> CreateReverseVideoCommand()
         {
             return new ReverseVideoCommand(_executor, _commandBuilder);
+        }
+
+        public ICommand<MergeVideosModel> CreateMergeVideosCommand()
+        {
+            return new MergeVideosCommand(_executor, _commandBuilder);
         }
     }
 }
