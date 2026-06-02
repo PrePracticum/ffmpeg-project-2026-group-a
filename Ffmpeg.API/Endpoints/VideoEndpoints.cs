@@ -44,6 +44,10 @@ namespace FFmpeg.API.Endpoints
             app.MapPost("/api/video/convert", ConvertVideo)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
+            app.MapPost("/api/video/merge", MergeVideos)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
         }
 
         private static async Task<IResult> AddWatermark(
@@ -442,6 +446,68 @@ namespace FFmpeg.API.Endpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in ConvertVideo endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
+        private static async Task<IResult> MergeVideos(
+            HttpContext context,
+            [FromForm] MergeVideosDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.FirstVideoFile == null || dto.SecondVideoFile == null)
+                {
+                    return Results.BadRequest("Both video files are required");
+                }
+
+                string firstVideoFileName = await fileService.SaveUploadedFileAsync(dto.FirstVideoFile);
+                string secondVideoFileName = await fileService.SaveUploadedFileAsync(dto.SecondVideoFile);
+
+                string extension = Path.GetExtension(dto.FirstVideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { firstVideoFileName, secondVideoFileName, outputFileName };
+
+                try
+                {
+                    var command = ffmpegService.CreateMergeVideosCommand();
+                    var result = await command.ExecuteAsync(new MergeVideosModel
+                    {
+                        FirstInputFile = firstVideoFileName,
+                        SecondInputFile = secondVideoFileName,
+                        OutputFile = outputFileName,
+                        Orientation = dto.Orientation ?? "horizontal",
+                        VideoCodec = "libx264"
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to merge videos: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    string downloadName = "merged_" + dto.FirstVideoFile.FileName;
+                    return Results.File(fileBytes, "video/mp4", downloadName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing merge videos request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in MergeVideos endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
