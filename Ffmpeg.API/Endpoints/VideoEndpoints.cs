@@ -25,6 +25,10 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
+            app.MapPost("/api/video/chroma-key", ChromaKey)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
             app.MapPost("/api/video/brightness-contrast", ChangeBrightnessContrast)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
@@ -109,6 +113,87 @@ namespace FFmpeg.API.Endpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in AddWatermark endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
+        private static async Task<IResult> ChromaKey(
+            HttpContext context,
+            [FromForm] ChromaKeyDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null || dto.BackgroundFile == null || string.IsNullOrWhiteSpace(dto.OutputFileName))
+                {
+                    return Results.BadRequest("Video file, background file and output file name are required");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string backgroundFileName = await fileService.SaveUploadedFileAsync(dto.BackgroundFile);
+
+                string outputFileNameRaw = Path.GetFileName(dto.OutputFileName);
+                string extension = Path.GetExtension(outputFileNameRaw);
+                if (string.IsNullOrEmpty(extension))
+                {
+                    extension = Path.GetExtension(dto.VideoFile.FileName);
+                }
+
+                if (string.IsNullOrEmpty(extension))
+                {
+                    extension = ".mp4";
+                }
+
+                string downloadName = outputFileNameRaw.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+                    ? outputFileNameRaw
+                    : outputFileNameRaw + extension;
+
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+                List<string> filesToCleanup = new List<string> { videoFileName, backgroundFileName, outputFileName };
+
+                try
+                {
+                    var command = ffmpegService.CreateChromaKeyCommand();
+                    var result = await command.ExecuteAsync(new ChromaKeyModel
+                    {
+                        InputFile = videoFileName,
+                        BackgroundFile = backgroundFileName,
+                        OutputFile = outputFileName
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to replace green screen: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    string contentType = extension.ToLowerInvariant() switch
+                    {
+                        ".mp4" => "video/mp4",
+                        ".mov" => "video/quicktime",
+                        ".avi" => "video/x-msvideo",
+                        _ => "application/octet-stream"
+                    };
+
+                    return Results.File(fileBytes, contentType, downloadName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing chroma-key request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in ChromaKey endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
