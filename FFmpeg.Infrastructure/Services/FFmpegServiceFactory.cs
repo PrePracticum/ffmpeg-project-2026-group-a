@@ -19,6 +19,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<ReverseVideoModel> CreateReverseVideoCommand();
         ICommand<MergeVideosModel> CreateMergeVideosCommand();
         ICommand<ChromaKeyModel> CreateChromaKeyCommand();
+        ICommand<AudioRemovalModel> CreateAudioRemovalCommand();
     }
 
     public class FFmpegServiceFactory : IFFmpegServiceFactory
@@ -65,6 +66,9 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<ChromaKeyModel> CreateChromaKeyCommand()
         {
             return new ChromaKeyCommand(_executor, _commandBuilder);
+        public ICommand<AudioRemovalModel> CreateAudioRemovalCommand()
+        {
+            return new AudioRemovalCommand(_executor, _commandBuilder);
         }
     }
 }
