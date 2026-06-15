@@ -18,6 +18,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<ConvertVideoModel> CreateConvertVideoCommand();
         ICommand<ReverseVideoModel> CreateReverseVideoCommand();
         ICommand<MergeVideosModel> CreateMergeVideosCommand();
+        ICommand<FadeEffectModel> CreateFadeEffectCommand();
         ICommand<AudioRemovalModel> CreateAudioRemovalCommand();
         ICommand<GifFromVideoModel> CreateGifFromVideoCommand();
         ICommand<BlurVideoModel> CreateBlurVideoCommand();
@@ -62,6 +63,11 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<MergeVideosModel> CreateMergeVideosCommand()
         {
             return new MergeVideosCommand(_executor, _commandBuilder);
+        }
+
+        public ICommand<FadeEffectModel> CreateFadeEffectCommand()
+        {
+            return new FadeEffectCommand(_executor, _commandBuilder);
         }
 
         public ICommand<AudioRemovalModel> CreateAudioRemovalCommand()
