@@ -20,6 +20,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<MergeVideosModel> CreateMergeVideosCommand();
         ICommand<AudioRemovalModel> CreateAudioRemovalCommand();
         ICommand<GifFromVideoModel> CreateGifFromVideoCommand();
+        ICommand<BlurVideoModel> CreateBlurVideoCommand();
     }
 
     public class FFmpegServiceFactory : IFFmpegServiceFactory
@@ -71,6 +72,11 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<GifFromVideoModel> CreateGifFromVideoCommand()
         {
             return new GifFromVideoCommand(_executor, _commandBuilder);
+        }
+
+        public ICommand<BlurVideoModel> CreateBlurVideoCommand()
+        {
+            return new BlurVideoCommand(_executor, _commandBuilder);
         }
     }
 }
