@@ -22,6 +22,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<GifFromVideoModel> CreateGifFromVideoCommand();
         ICommand<BlurVideoModel> CreateBlurVideoCommand();
         ICommand<AddBorderModel> CreateAddBorderCommand();
+        ICommand<AddTextModel> CreateAddTextCommand();
     }
 
     public class FFmpegServiceFactory : IFFmpegServiceFactory
@@ -83,6 +84,10 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<AddBorderModel> CreateAddBorderCommand()
         {
             return new AddBorderCommand(_executor, _commandBuilder);
+        }
+        public ICommand<AddTextModel> CreateAddTextCommand()
+        {
+            return new AddTextCommand(_executor, _commandBuilder);
         }
     }
 }
