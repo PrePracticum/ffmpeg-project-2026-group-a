@@ -17,6 +17,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<ExtractFrameModel> CreateExtractFrameCommand();
         ICommand<ConvertVideoModel> CreateConvertVideoCommand();
         ICommand<ReverseVideoModel> CreateReverseVideoCommand();
+            ICommand<SplitScreenModel> CreateSplitScreenCommand();
         ICommand<MergeVideosModel> CreateMergeVideosCommand();
         ICommand<AudioRemovalModel> CreateAudioRemovalCommand();
         ICommand<GifFromVideoModel> CreateGifFromVideoCommand();
@@ -30,7 +31,7 @@ namespace FFmpeg.Infrastructure.Services
         private readonly FFmpegExecutor _executor;
         private readonly ICommandBuilder _commandBuilder;
 
-        public FFmpegServiceFactory(IConfiguration configuration, ILogger logger = null)
+    public FFmpegServiceFactory(IConfiguration configuration, ILogger? logger = null)
         {
             string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
             string ffmpegPath = Path.Combine(baseDirectory, "external", "ffmpeg.exe");
@@ -59,6 +60,11 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<ReverseVideoModel> CreateReverseVideoCommand()
         {
             return new ReverseVideoCommand(_executor, _commandBuilder);
+        }
+
+        public ICommand<SplitScreenModel> CreateSplitScreenCommand()
+        {
+            return new SplitScreenCommand(_executor, _commandBuilder);
         }
 
         public ICommand<MergeVideosModel> CreateMergeVideosCommand()

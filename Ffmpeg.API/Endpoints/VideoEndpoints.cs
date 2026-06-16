@@ -49,6 +49,10 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
+            app.MapPost("/api/video/split-screen", SplitScreen)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
 
             app.MapPost("/api/video/remove-audio", RemoveAudio)
                 .DisableAntiforgery()
@@ -528,6 +532,88 @@ namespace FFmpeg.API.Endpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in MergeVideos endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
+        private static async Task<IResult> SplitScreen(
+            HttpContext context,
+            [FromForm] SplitScreenDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                if (dto.Duplications < 1)
+                {
+                    return Results.BadRequest("Duplications must be at least 1");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+
+                // Ensure output filename has a valid extension. If caller provided a name without extension,
+                // append the same extension as the input file. If no name provided, generate one including extension.
+                string outputFileName;
+                if (string.IsNullOrEmpty(dto.OutputFileName))
+                {
+                    outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+                }
+                else
+                {
+                    // If provided name has no extension, append the input file extension
+                    if (Path.HasExtension(dto.OutputFileName))
+                    {
+                        outputFileName = dto.OutputFileName;
+                    }
+                    else
+                    {
+                        outputFileName = dto.OutputFileName + extension;
+                    }
+                }
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    var command = ffmpegService.CreateSplitScreenCommand();
+                    var result = await command.ExecuteAsync(new SplitScreenModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        Duplications = dto.Duplications,
+                        VideoCodec = "libx264"
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to create split screen: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing split-screen request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in SplitScreen endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
