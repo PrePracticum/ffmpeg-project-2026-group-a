@@ -21,6 +21,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<AudioRemovalModel> CreateAudioRemovalCommand();
         ICommand<GifFromVideoModel> CreateGifFromVideoCommand();
         ICommand<BlurVideoModel> CreateBlurVideoCommand();
+        ICommand<AddBorderModel> CreateAddBorderCommand();
     }
 
     public class FFmpegServiceFactory : IFFmpegServiceFactory
@@ -77,6 +78,11 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<BlurVideoModel> CreateBlurVideoCommand()
         {
             return new BlurVideoCommand(_executor, _commandBuilder);
+        }
+
+        public ICommand<AddBorderModel> CreateAddBorderCommand()
+        {
+            return new AddBorderCommand(_executor, _commandBuilder);
         }
     }
 }
