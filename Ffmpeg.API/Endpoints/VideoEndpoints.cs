@@ -551,9 +551,26 @@ namespace FFmpeg.API.Endpoints
 
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
                 string extension = Path.GetExtension(dto.VideoFile.FileName);
-                string outputFileName = string.IsNullOrEmpty(dto.OutputFileName)
-                    ? await fileService.GenerateUniqueFileNameAsync(extension)
-                    : dto.OutputFileName;
+
+                // Ensure output filename has a valid extension. If caller provided a name without extension,
+                // append the same extension as the input file. If no name provided, generate one including extension.
+                string outputFileName;
+                if (string.IsNullOrEmpty(dto.OutputFileName))
+                {
+                    outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+                }
+                else
+                {
+                    // If provided name has no extension, append the input file extension
+                    if (Path.HasExtension(dto.OutputFileName))
+                    {
+                        outputFileName = dto.OutputFileName;
+                    }
+                    else
+                    {
+                        outputFileName = dto.OutputFileName + extension;
+                    }
+                }
 
                 List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
 
