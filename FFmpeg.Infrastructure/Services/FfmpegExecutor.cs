@@ -12,9 +12,9 @@ namespace FFmpeg.Infrastructure.Services
     {
         private readonly string _ffmpegPath;
         private readonly bool _logOutput;
-        private readonly ILogger _logger;
+        private readonly ILogger? _logger;
 
-        public FFmpegExecutor(string ffmpegPath, bool logOutput = false, ILogger logger = null)
+        public FFmpegExecutor(string ffmpegPath, bool logOutput = false, ILogger? logger = null)
         {
             _ffmpegPath = !string.IsNullOrEmpty(ffmpegPath)
                 ? ffmpegPath
