@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.IO;
 
 namespace FFmpeg.Infrastructure.Services
 {
@@ -19,6 +20,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<ReverseVideoModel> CreateReverseVideoCommand();
             ICommand<SplitScreenModel> CreateSplitScreenCommand();
         ICommand<MergeVideosModel> CreateMergeVideosCommand();
+        ICommand<ChromaKeyModel> CreateChromaKeyCommand();
         ICommand<AudioRemovalModel> CreateAudioRemovalCommand();
         ICommand<GifFromVideoModel> CreateGifFromVideoCommand();
         ICommand<BlurVideoModel> CreateBlurVideoCommand();
@@ -70,6 +72,11 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<MergeVideosModel> CreateMergeVideosCommand()
         {
             return new MergeVideosCommand(_executor, _commandBuilder);
+        }
+
+        public ICommand<ChromaKeyModel> CreateChromaKeyCommand()
+        {
+            return new ChromaKeyCommand(_executor, _commandBuilder);
         }
 
         public ICommand<AudioRemovalModel> CreateAudioRemovalCommand()
