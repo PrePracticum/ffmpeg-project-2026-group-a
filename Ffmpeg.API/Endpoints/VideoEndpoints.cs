@@ -493,10 +493,9 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
-      private static async Task<IResult> RotateVideo(
+     private static async Task<IResult> RotateVideo(
             HttpContext context,
-            [FromForm] IFormFile videoFile,
-            [FromForm] double angle)
+            [FromForm] RotateVideoDto dto) 
         {
             var fileService = context.RequestServices.GetRequiredService<IFileService>();
             var rotationService = context.RequestServices.GetRequiredService<IRotationService>();
@@ -504,13 +503,13 @@ namespace FFmpeg.API.Endpoints
 
             try
             {
-                if (videoFile == null)
+                if (dto.VideoFile == null) 
                 {
                     return Results.BadRequest("Video file is required");
                 }
 
-                string videoFileName = await fileService.SaveUploadedFileAsync(videoFile);
-                string extension = Path.GetExtension(videoFile.FileName);
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
 
                 List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
@@ -521,13 +520,13 @@ namespace FFmpeg.API.Endpoints
                     {
                         InputFile = videoFileName,
                         OutputFile = outputFileName,
-                        Angle = angle
+                        Angle = dto.Angle 
                     });
 
                     byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
                     _ = fileService.CleanupTempFilesAsync(filesToCleanup);
 
-                    return Results.File(fileBytes, "video/mp4", videoFile.FileName);
+                    return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
                 }
                 catch (Exception ex)
                 {
