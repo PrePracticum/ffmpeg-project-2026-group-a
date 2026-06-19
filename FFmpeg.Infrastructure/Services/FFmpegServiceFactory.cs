@@ -26,6 +26,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<BlurVideoModel> CreateBlurVideoCommand();
         ICommand<AddBorderModel> CreateAddBorderCommand();
         ICommand<AddTextModel> CreateAddTextCommand();
+        ICommand<VolumeModel> CreateVolumeCommand();
     }
 
     public class FFmpegServiceFactory : IFFmpegServiceFactory
@@ -101,6 +102,10 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<AddTextModel> CreateAddTextCommand()
         {
             return new AddTextCommand(_executor, _commandBuilder);
+        }
+        public ICommand<VolumeModel> CreateVolumeCommand()
+        {
+            return new VolumeCommand(_executor, _commandBuilder);
         }
     }
 }
