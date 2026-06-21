@@ -20,6 +20,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<ReverseVideoModel> CreateReverseVideoCommand();
             ICommand<SplitScreenModel> CreateSplitScreenCommand();
         ICommand<MergeVideosModel> CreateMergeVideosCommand();
+        ICommand<FadeEffectModel> CreateFadeEffectCommand();
         ICommand<ChromaKeyModel> CreateChromaKeyCommand();
         ICommand<AudioRemovalModel> CreateAudioRemovalCommand();
         ICommand<GifFromVideoModel> CreateGifFromVideoCommand();
@@ -75,6 +76,9 @@ namespace FFmpeg.Infrastructure.Services
             return new MergeVideosCommand(_executor, _commandBuilder);
         }
 
+        public ICommand<FadeEffectModel> CreateFadeEffectCommand()
+        {
+            return new FadeEffectCommand(_executor, _commandBuilder);
         public ICommand<ChromaKeyModel> CreateChromaKeyCommand()
         {
             return new ChromaKeyCommand(_executor, _commandBuilder);
