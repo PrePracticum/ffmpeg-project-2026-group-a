@@ -10,3 +10,4 @@ namespace FFmpeg.API.DTOs
         public bool FadeIn { get; set; } = true;
     }
 }
+// Adding PR for review
