@@ -1,6 +1,7 @@
 using Ffmpeg.Command;
 using FFmpeg.API.Endpoints;
 using FFmpeg.Core.Interfaces;
+using FFmpeg.Infrastructure.Commands;
 using FFmpeg.Infrastructure.Services;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;

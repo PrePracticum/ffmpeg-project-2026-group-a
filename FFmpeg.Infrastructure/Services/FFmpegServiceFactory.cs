@@ -25,6 +25,7 @@ namespace FFmpeg.Infrastructure.Services
         ICommand<AudioRemovalModel> CreateAudioRemovalCommand();
         ICommand<GifFromVideoModel> CreateGifFromVideoCommand();
         ICommand<BlurVideoModel> CreateBlurVideoCommand();
+        ICommand<ReduceQualityModel> CreateReduceQualityCommand();
         ICommand<AddBorderModel> CreateAddBorderCommand();
         ICommand<AddTextModel> CreateAddTextCommand();
         ICommand<VolumeModel> CreateVolumeCommand();
@@ -79,6 +80,7 @@ namespace FFmpeg.Infrastructure.Services
         public ICommand<FadeEffectModel> CreateFadeEffectCommand()
         {
             return new FadeEffectCommand(_executor, _commandBuilder);
+        }
         public ICommand<ChromaKeyModel> CreateChromaKeyCommand()
         {
             return new ChromaKeyCommand(_executor, _commandBuilder);
@@ -99,7 +101,11 @@ namespace FFmpeg.Infrastructure.Services
             return new BlurVideoCommand(_executor, _commandBuilder);
         }
 
-        public ICommand<AddBorderModel> CreateAddBorderCommand()
+        public ICommand<ReduceQualityModel> CreateReduceQualityCommand()
+        {
+            return new ReduceQualityCommand(_executor, _commandBuilder);
+        } 
+       public ICommand<AddBorderModel> CreateAddBorderCommand()
         {
             return new AddBorderCommand(_executor, _commandBuilder);
         }
