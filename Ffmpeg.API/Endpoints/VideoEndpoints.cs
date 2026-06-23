@@ -25,6 +25,10 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
+            app.MapPost("/api/video/chroma-key", ChromaKey)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
             app.MapPost("/api/video/brightness-contrast", ChangeBrightnessContrast)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
@@ -49,6 +53,10 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
+            app.MapPost("/api/video/split-screen", SplitScreen)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
 
             app.MapPost("/api/video/remove-audio", RemoveAudio)
                 .DisableAntiforgery()
@@ -59,6 +67,18 @@ namespace FFmpeg.API.Endpoints
                .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
             app.MapPost("/api/video/blur", BlurVideo)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
+            app.MapPost("/api/video/fade", CreateFade);
+            app.MapPost("/api/video/add-border", AddBorder)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+            app.MapPost("/api/video/add-text", AddTextToVideo)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
+
+            app.MapPost("/api/video/volume", SetVolume)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
@@ -126,6 +146,87 @@ namespace FFmpeg.API.Endpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in AddWatermark endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
+        private static async Task<IResult> ChromaKey(
+            HttpContext context,
+            [FromForm] ChromaKeyDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null || dto.BackgroundFile == null || string.IsNullOrWhiteSpace(dto.OutputFileName))
+                {
+                    return Results.BadRequest("Video file, background file and output file name are required");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string backgroundFileName = await fileService.SaveUploadedFileAsync(dto.BackgroundFile);
+
+                string outputFileNameRaw = Path.GetFileName(dto.OutputFileName);
+                string extension = Path.GetExtension(outputFileNameRaw);
+                if (string.IsNullOrEmpty(extension))
+                {
+                    extension = Path.GetExtension(dto.VideoFile.FileName);
+                }
+
+                if (string.IsNullOrEmpty(extension))
+                {
+                    extension = ".mp4";
+                }
+
+                string downloadName = outputFileNameRaw.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+                    ? outputFileNameRaw
+                    : outputFileNameRaw + extension;
+
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+                List<string> filesToCleanup = new List<string> { videoFileName, backgroundFileName, outputFileName };
+
+                try
+                {
+                    var command = ffmpegService.CreateChromaKeyCommand();
+                    var result = await command.ExecuteAsync(new ChromaKeyModel
+                    {
+                        InputFile = videoFileName,
+                        BackgroundFile = backgroundFileName,
+                        OutputFile = outputFileName
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to replace green screen: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    string contentType = extension.ToLowerInvariant() switch
+                    {
+                        ".mp4" => "video/mp4",
+                        ".mov" => "video/quicktime",
+                        ".avi" => "video/x-msvideo",
+                        _ => "application/octet-stream"
+                    };
+
+                    return Results.File(fileBytes, contentType, downloadName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing chroma-key request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in ChromaKey endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
@@ -529,6 +630,88 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
+        private static async Task<IResult> SplitScreen(
+            HttpContext context,
+            [FromForm] SplitScreenDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                if (dto.Duplications < 1)
+                {
+                    return Results.BadRequest("Duplications must be at least 1");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+
+                // Ensure output filename has a valid extension. If caller provided a name without extension,
+                // append the same extension as the input file. If no name provided, generate one including extension.
+                string outputFileName;
+                if (string.IsNullOrEmpty(dto.OutputFileName))
+                {
+                    outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+                }
+                else
+                {
+                    // If provided name has no extension, append the input file extension
+                    if (Path.HasExtension(dto.OutputFileName))
+                    {
+                        outputFileName = dto.OutputFileName;
+                    }
+                    else
+                    {
+                        outputFileName = dto.OutputFileName + extension;
+                    }
+                }
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    var command = ffmpegService.CreateSplitScreenCommand();
+                    var result = await command.ExecuteAsync(new SplitScreenModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        Duplications = dto.Duplications,
+                        VideoCodec = "libx264"
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to create split screen: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing split-screen request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in SplitScreen endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
         private static async Task<IResult> RemoveAudio(
             HttpContext context,
             [FromForm] AudioRemovalDto dto)
@@ -581,6 +764,65 @@ namespace FFmpeg.API.Endpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in RemoveAudio endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
+        private static async Task<IResult> CreateFade(
+            HttpContext context,
+            [FromForm] FadeEffectDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("video file is required");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+                try
+                {
+                    var command = ffmpegService.CreateFadeEffectCommand();
+                    var result = await command.ExecuteAsync(new FadeEffectModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        DurationSeconds = dto.DurationSeconds,
+                        FadeIn = dto.FadeIn,
+                        VideoCodec = "libx264"
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to apply fade effect: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    string downloadName = "fade_" + dto.VideoFile.FileName;
+                    return Results.File(fileBytes, "video/mp4", downloadName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing fade effect request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in CreateFade endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
@@ -694,6 +936,185 @@ namespace FFmpeg.API.Endpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in BlurVideo endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+        private static async Task<IResult> AddBorder(
+            HttpContext context,
+            [FromForm] AddBorderDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    var command = ffmpegService.CreateAddBorderCommand();
+                    var result = await command.ExecuteAsync(new AddBorderModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        BorderColor = dto.BorderColor,
+                        BorderSize = dto.BorderSize
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to add border: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", "bordered_" + dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing add border request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in AddBorder endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+        private static async Task<IResult> AddTextToVideo(
+            HttpContext context,
+            [FromForm] AddTextDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null || string.IsNullOrEmpty(dto.TextContent))
+                {
+                    return Results.BadRequest("Video file and text content are required");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    var command = ffmpegService.CreateAddTextCommand();
+                    var result = await command.ExecuteAsync(new AddTextModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        TextContent = dto.TextContent,
+                        FontColor = dto.FontColor,
+                        FontSize = dto.FontSize,
+                        XPosition = dto.XPosition,
+                        YPosition = dto.YPosition
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to add text: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", "text_" + dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing add text request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in AddTextToVideo endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
+        private static async Task<IResult> SetVolume(
+            HttpContext context,
+            [FromForm] VolumeDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var ffmpegService = context.RequestServices.GetRequiredService<IFFmpegServiceFactory>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                if (dto.VolumeLevel <= 0)
+                {
+                    return Results.BadRequest("Volume level must be greater than 0");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    var command = ffmpegService.CreateVolumeCommand();
+                    var result = await command.ExecuteAsync(new VolumeModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        VolumeLevel = dto.VolumeLevel
+                    });
+
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to set volume: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing volume request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in SetVolume endpoint");
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
