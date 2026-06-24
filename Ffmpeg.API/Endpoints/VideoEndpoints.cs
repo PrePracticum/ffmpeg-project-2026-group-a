@@ -45,6 +45,7 @@ namespace FFmpeg.API.Endpoints
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
 
+            app.MapPost("/api/video/rotate", RotateVideo);
             app.MapPost("/api/video/convert", ConvertVideo)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
@@ -501,6 +502,55 @@ namespace FFmpeg.API.Endpoints
             }
         }
 
+     private static async Task<IResult> RotateVideo(
+            HttpContext context,
+            [FromForm] RotateVideoDto dto) 
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var rotationService = context.RequestServices.GetRequiredService<IRotationService>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                if (dto.VideoFile == null) 
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+                string extension = Path.GetExtension(dto.VideoFile.FileName);
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    rotationService.RotateVideo(new RotationModel
+                    {
+                        InputFile = videoFileName,
+                        OutputFile = outputFileName,
+                        Angle = dto.Angle 
+                    });
+
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+
+                    return Results.File(fileBytes, "video/mp4", dto.VideoFile.FileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing video rotation request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in RotateVideo endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
+
         private static async Task<IResult> ConvertVideo(
             HttpContext context,
             [FromForm] ConvertVideoDto dto)
@@ -517,7 +567,6 @@ namespace FFmpeg.API.Endpoints
                 }
 
                 string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
-
                 string extension = string.IsNullOrEmpty(dto.TargetFormat) ? ".avi" : dto.TargetFormat;
                 if (!extension.StartsWith("."))
                 {
@@ -525,7 +574,6 @@ namespace FFmpeg.API.Endpoints
                 }
 
                 string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
-
                 List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
 
                 string fullInputPath = fileService.GetFullInputPath(videoFileName);
@@ -534,7 +582,6 @@ namespace FFmpeg.API.Endpoints
                 try
                 {
                     var command = ffmpegService.CreateConvertVideoCommand();
-
                     var result = await command.ExecuteAsync(new ConvertVideoModel
                     {
                         InputVideoName = fullInputPath,
