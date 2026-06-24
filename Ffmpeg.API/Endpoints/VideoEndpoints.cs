@@ -85,6 +85,9 @@ namespace FFmpeg.API.Endpoints
             app.MapPost("/api/video/reduce-quality", ReduceQuality)
                 .DisableAntiforgery()
                 .WithMetadata(new RequestSizeLimitAttribute(104857600));
+            app.MapPost("/api/video/thumbnail", CreateThumbnail)
+                .DisableAntiforgery()
+                .WithMetadata(new RequestSizeLimitAttribute(104857600));
         }
 
         private static async Task<IResult> AddWatermark(
@@ -722,7 +725,7 @@ namespace FFmpeg.API.Endpoints
 
             try
             {
-                if (dto.VideoFile == null )
+                if (dto.VideoFile == null)
                 {
                     return Results.BadRequest("video file is required");
                 }
@@ -1174,5 +1177,76 @@ namespace FFmpeg.API.Endpoints
                 return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
             }
         }
+        private static async Task<IResult> CreateThumbnail(
+           HttpContext context,
+           [FromForm] CreateThumbnailDto dto)
+        {
+            var fileService = context.RequestServices.GetRequiredService<IFileService>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                // 1. בדיקת תקינות הקלט
+                if (dto.VideoFile == null)
+                {
+                    return Results.BadRequest("Video file is required");
+                }
+
+                // 2. שמירת הסרטון שהמשתמש העלה לתיקייה זמנית
+                string videoFileName = await fileService.SaveUploadedFileAsync(dto.VideoFile);
+
+                // 3. יצירת שם ייחודי לתמונת הפלט (סיומת .jpg)
+                string extension = ".jpg";
+                string outputFileName = await fileService.GenerateUniqueFileNameAsync(extension);
+
+                // רשימת קבצים למחיקה בסיום הפעולה
+                List<string> filesToCleanup = new List<string> { videoFileName, outputFileName };
+
+                try
+                {
+                    // 4. שליפת הרכיבים הדרושים והרצת ה-Command החדש שלך
+                    var executor = context.RequestServices.GetRequiredService<FFmpegExecutor>();
+                    var builder = context.RequestServices.GetRequiredService<ICommandBuilder>();
+                    var command = new CreateThumbnailCommand(executor, builder);
+
+                    var result = await command.ExecuteAsync(new CreateThumbnailModel
+                    {
+                        VideoName = videoFileName,
+                        OutputImageName = outputFileName
+                    });
+
+                    // 5. בדיקה אם הפקודה הצליחה
+                    if (!result.IsSuccess)
+                    {
+                        logger.LogError("FFmpeg command failed: {ErrorMessage}, Command: {Command}",
+                            result.ErrorMessage, result.CommandExecuted);
+                        return Results.Problem("Failed to create thumbnail: " + result.ErrorMessage, statusCode: 500);
+                    }
+
+                    // 6. קריאת קובץ התמונה שנוצר והחזרתו למשתמש
+                    byte[] fileBytes = await fileService.GetOutputFileAsync(outputFileName);
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup); // ניקוי קבצים זמניים ברקע
+
+                    // קביעת שם ההורדה שיוחזר למשתמש
+                    string downloadName = string.IsNullOrEmpty(dto.OutputImageName)
+                        ? "thumbnail.jpg"
+                        : dto.OutputImageName.EndsWith(".jpg") ? dto.OutputImageName : dto.OutputImageName + ".jpg";
+
+                    return Results.File(fileBytes, "image/jpeg", downloadName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing thumbnail request");
+                    _ = fileService.CleanupTempFilesAsync(filesToCleanup);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in CreateThumbnail endpoint");
+                return Results.Problem("An error occurred: " + ex.Message, statusCode: 500);
+            }
+        }
     }
+
 }
